@@ -2,7 +2,7 @@ import pickle, warnings, json, itertools, re, copy
 
 from scipy.spatial.distance import squareform, pdist
 
-from data_utils import *
+from utilities.data_utils import *
 import configparser
 
 import numpy as np
@@ -143,6 +143,7 @@ class ProcessData:
                 # else, if data type is 16s and 16s sequences are provided (either in config file or as column names in sequence data), make 16s tree
                 if 'sequences' in self.config['sequence_data'] and self.config['sequence_data']['sequences']!='' and self.sequences is not None:
                     self.sequence_tree=make_16s_tree(self.config['sequence_data']['sequences'], self.sequences, self.sequence_data, self.save_path)
+
                 else:
                     # sequence_names = [f'ASV {i}' for i in range(self.sequences.shape[1])]
                     # seq_df = pd.Series(self.sequences.columns.values, index = sequence_names)
@@ -394,7 +395,7 @@ class ProcessData:
             sequence_data = sequence_data.rename(columns=seq_to_lab)
         else:
             sequences = None
-        print('Loaded 16s data has {0} samples and {1} genera'.format(
+        print('Loaded 16s data has {0} samples and {1} taxa'.format(
             sequence_data.shape[0], sequence_data.shape[1]))
         return sequence_data, sequences
 
@@ -404,7 +405,7 @@ class ProcessData:
         sequence_data = read_ctsv(seq_data)
         keep_ixs = [s for s in self.subject_IDs if s in sequence_data.index.values]
         sequence_data = sequence_data.loc[keep_ixs]
-        print('Loaded WGS data has {0} samples and {1} genera'.format(
+        print('Loaded WGS data has {0} samples and {1} taxa'.format(
             sequence_data.shape[0], sequence_data.shape[1]))
         return sequence_data, sequences
 

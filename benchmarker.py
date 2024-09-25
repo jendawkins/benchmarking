@@ -340,9 +340,9 @@ if __name__ == "__main__":
     parser.add_argument('--kfolds', type=int, default=5,
                         help='Number of folds for k-fold cross val')
     parser.add_argument('--model', type=str, default='LR', choices=['RF','LR','GradBoost','AdaBoost'])
-    parser.add_argument('--dtype', type=str, default=['metabs'], nargs='+')
+    parser.add_argument('--dtype', type=str, default=['metabs'], nargs='+') # OPTIONS
     parser.add_argument('--log_dir',type=str, default='logs/')
-    parser.add_argument('--taxa_tr', type=str,default='none')
+    parser.add_argument('--taxa_tr', type=str,default='none', choices=['standardize','clr','none','sqrt']) # OPTIONS
     parser.add_argument('--no_filter', type=int, default=0)
 
     args = parser.parse_args()
