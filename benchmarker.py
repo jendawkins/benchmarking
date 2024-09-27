@@ -8,11 +8,15 @@ from sklearn.metrics import f1_score, roc_auc_score, accuracy_score
 import matplotlib
 matplotlib.use('agg')
 import sklearn
-from utilities.util import cv_loo_splits, cv_kfold_splits, split_and_preprocess_dataset, merge_datasets
-from plot_synthetic_data import *
+from utilities.util import cv_loo_splits, cv_kfold_splits, split_and_preprocess_dataset, merge_datasets, plot_input_data
+import numpy as np
+import pandas as pd
+# from plot_synthetic_data import *
 from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
-from viz import plot_input_data
+import pickle as pkl
+import argparse
+
 
 class benchmarker():
     def __init__(self, dataset_dict, y, args, perturbed_mets = None, seed=0, path='.'):
@@ -325,27 +329,30 @@ if __name__ == "__main__":
                         default='')
     parser.add_argument('--met_data', metavar='DIR',
                         help='path to metabolite dataset',
-                        default='/Users/jendawk/Dropbox (MIT)/microbes-metabolites/datasets/FRANZOSA/processed/franzosa_pubchem/mets.pkl')
+                        default='/Users/jendawk/Dropbox (MIT)/benchmarking/datasets/FRANZOSA/processed/TEST/mets.pkl')
     parser.add_argument('--taxa_data', metavar='DIR',
                         help='path to taxanomic dataset',
-                        default='/Users/jendawk/Dropbox (MIT)/microbes-metabolites/datasets/FRANZOSA/processed/franzosa_ra/seqs.pkl')
+                        default='/Users/jendawk/Dropbox (MIT)/benchmarking/datasets/FRANZOSA/processed/TEST/taxa.pkl')
     parser.add_argument('--seed', type=int, default=[0,1,2,3],
                         help='Set random seed for reproducibility', nargs = '+')
     parser.add_argument('--cv_type', type=str, default='kfold',
-                        choices=['loo', 'kfold', 'None'],
+                        choices=['loo', 'kfold'],
                         help='Choose cross val type')
     parser.add_argument("--scorer",type=str, default='f1',choices=['f1', 'roc_auc', 'accuracy'],
                         help='metric for choosing best hyperparameter(s) in inner CV folds')
-    parser.add_argument("--inner_folds", type=int, default=5)
+    parser.add_argument("--inner_folds", type=int)
     parser.add_argument('--kfolds', type=int, default=5,
                         help='Number of folds for k-fold cross val')
     parser.add_argument('--model', type=str, default='LR', choices=['RF','LR','GradBoost','AdaBoost'])
-    parser.add_argument('--dtype', type=str, default=['metabs'], nargs='+') # OPTIONS
+    parser.add_argument('--data_type', type=str, default=['both'], nargs='+') # OPTIONS
     parser.add_argument('--log_dir',type=str, default='logs/')
-    parser.add_argument('--taxa_tr', type=str,default='none', choices=['standardize','clr','none','sqrt']) # OPTIONS
+    parser.add_argument('--taxa_tr', type=str,default='sqrt', choices=['clr','none','sqrt']) # OPTIONS
     parser.add_argument('--no_filter', type=int, default=0)
 
     args = parser.parse_args()
+
+    if args.inner_folds is None:
+        args.inner_folds = args.kfolds
 
     print('')
     print('START')
@@ -354,15 +361,15 @@ if __name__ == "__main__":
     if args.run_name is None:
         args.run_name=''
 
-    if len(args.dtype)>1:
-        args.run_name += '_'.join(args.dtype)
+    if len(args.data_type)>1:
+        args.run_name += '_'.join(args.data_type)
         args.run_name += '_' + args.met_data.split('/')[-2]
     else:
-        if 'taxa' in args.dtype and args.taxa_data is not None:
-            args.run_name += args.dtype[0]
+        if 'taxa' in args.data_type and args.taxa_data is not None:
+            args.run_name += args.data_type[0]
             args.run_name += '_' + args.taxa_data.split('/')[-2]
-        if 'metabs' in args.dtype and args.met_data is not None:
-            args.run_name += args.dtype[0]
+        if 'metabs' in args.data_type and args.met_data is not None:
+            args.run_name += args.data_type[0]
             args.run_name += '_' + args.met_data.split('/')[-2]
     if args.met_data is not None:
         tmp = args.met_data.split('/')[-1]
@@ -401,31 +408,13 @@ if __name__ == "__main__":
             continue
 
         dataset_dict = {}
-        if 'metabs' in args.dtype or 'both' in args.dtype:
+        if 'metabs' in args.data_type or 'both' in args.data_type:
             dataset_dict['metabs'] = pd.read_pickle(args.met_data)
-            if args.no_filter:
-                dataset_dict['metabs']['preprocessing']={}
-            if 'distances' not in dataset_dict['metabs'].keys():
-                dataset_dict['metabs']['distances'] = dataset_dict['metabs']['tree_distance']
-            if not isinstance(dataset_dict['metabs']['distances'], pd.DataFrame) and \
-                    dataset_dict['metabs']['distances'].shape[0] == dataset_dict['metabs']['X'].shape[1]:
-                dataset_dict['metabs']['distances'] = pd.DataFrame(dataset_dict['metabs']['distances'],
-                                                                       index=dataset_dict['metabs']['X'].columns.values,
-                                                                       columns=dataset_dict['metabs'][
-                                                                           'X'].columns.values)
-            mets = dataset_dict['metabs']['distances'].columns.values
-            print(mets)
-            dataset_dict['metabs']['X'] = dataset_dict['metabs']['X'][mets]
             print(f'{dataset_dict["metabs"]["X"].shape[1]} metabolites in data')
 
 
-        if 'taxa' in args.dtype or 'both' in args.dtype:
+        if 'taxa' in args.data_type or 'both' in args.data_type:
             dataset_dict['taxa'] = pd.read_pickle(args.taxa_data)
-            if args.no_filter:
-                dataset_dict['taxa']['preprocessing']={}
-            if args.full == 0:
-                otus = dataset_dict['taxa']['distances'].columns.values
-                dataset_dict['taxa']['X'] = dataset_dict['taxa']['X'][otus]
             print(f'{dataset_dict["taxa"]["X"].shape[1]} taxa in data')
 
         dataset_dict, y = merge_datasets(dataset_dict)

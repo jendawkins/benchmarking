@@ -50,7 +50,7 @@ for type in args.type:
                         args.cv_type='loo'
                     else:
                         args.cv_type='kfold'
-                    cmd = f"python3 ./benchmarker.py --model {model} --met_data {met_data} --seed {seeds} --scorer {scorer} --dtype metabs --cv_type {args.cv_type} --taxa_tr {args.taxa_tr} --run_name {args.run_name}"
+                    cmd = f"python3 ./benchmarker.py --model {model} --met_data {met_data} --seed {seeds} --scorer {scorer} --data_type metabs --cv_type {args.cv_type} --taxa_tr {args.taxa_tr} --run_name {args.run_name}"
 
                     # cmd_out = cmd.replace(' ','').split('.py')[-1].replace('/','_').replace('--','__').replace('-','').replace('..','_').replace('.','_')
                     # cmd += f' > {cmd_out}.log 2>&1'
@@ -67,14 +67,14 @@ for type in args.type:
                                 args.cv_type = 'loo'
                             else:
                                 args.cv_type='kfold'
-                            cmd = f"python3 ./benchmarker.py --model {model} --met_data {met_data} --otu_data {taxa_data} --seed {seeds} --scorer {scorer} --dtype metabs otus --cv_type {args.cv_type} --taxa_tr {args.taxa_tr} --run_name {args.run_name}"
+                            cmd = f"python3 ./benchmarker.py --model {model} --met_data {met_data} --otu_data {taxa_data} --seed {seeds} --scorer {scorer} --data_type metabs otus --cv_type {args.cv_type} --taxa_tr {args.taxa_tr} --run_name {args.run_name}"
 
                         elif type=='taxa':
                             if 'CDI' in taxa_data:
                                 args.cv_type = 'loo'
                             else:
                                 args.cv_type='kfold'
-                            cmd = f"python3 ./benchmarker.py --model {model} --taxa_data {taxa_data} --seed {seeds} --scorer {scorer} --dtype taxa --cv_type {args.cv_type} --taxa_tr {args.taxa_tr} --run_name {args.run_name}"
+                            cmd = f"python3 ./benchmarker.py --model {model} --taxa_data {taxa_data} --seed {seeds} --scorer {scorer} --data_type taxa --cv_type {args.cv_type} --taxa_tr {args.taxa_tr} --run_name {args.run_name}"
 
                         else:
                             raise ValueError('Specify allowed type of data: metabs, otus, or both')

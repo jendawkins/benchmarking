@@ -1,18 +1,5 @@
 import pickle, warnings, json, itertools, re, copy
-try:
-    from rdkit import Chem
-except:
-    pass
-try:
-    import tmap as tm
-    from map4.map4 import MAP4Calculator
 
-    dim = 1024
-    MAP4 = MAP4Calculator(dimensions=dim)
-    ENC = tm.Minhash(dim)
-except:
-    # print('debug')
-    pass
 
 try:
     import configparser as ConfigParser
@@ -20,49 +7,22 @@ except:
     from six.moves import configparser as ConfigParser
 import time
 from joblib.parallel import Parallel, delayed
-import numpy as np
-from sklearn.model_selection import StratifiedKFold, LeaveOneOut, train_test_split
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
-import matplotlib.image as mpimg
-import pandas as pd
-try:
-    import requests
-except:
-    pass
-try:
-    import pubchempy as pcp
-except:
-    pass
 
-try:
-    from rdkit.Chem import Draw,MolFromInchi,AllChem, rdMolDescriptors
-    from rdkit import Chem, DataStructs
-except:
-    pass
-try:
-    from mxfp import mxfp
-except:
-    pass
-try:
-    from mhfp.encoder import MHFPEncoder
-except:
-    pass
+import requests
+import pubchempy as pcp
+
+
 # from mxfp import mxfp
 import configparser
 import os
 try:
-    import ete4
+    import ete3
 except:
     try:
-        import ete3 as ete4
+        import ete4 as ete3
     except:
         pass
 
-try:
-    import ete3
-except:
-    pass
 import shutil
 import re
 import operator as op
@@ -82,14 +42,6 @@ except:
     pass
 
 # from collections import defaultdict
-try:
-    import dgl
-    from dgl.nn.pytorch.glob import AvgPooling
-    from dgllife.model import load_pretrained
-    from dgllife.model.model_zoo import *
-    from dgllife.utils import mol_to_bigraph, PretrainAtomFeaturizer, PretrainBondFeaturizer
-except:
-    pass
 import numpy as np
 import pandas as pd
 try:
@@ -100,62 +52,6 @@ except:
 global TIME
 TIME = time.time()
 # from scipy.spatial.distance import pdist, squareform
-
-def collapse_metabolites(data, meta_df):
-    mets = data.columns.values
-    m_rename = {m: '__'.join([m.split('_')[0], m.split('__')[-1].split(': ')[-1]]) for m in mets}
-
-    data_renamed = data.rename(columns=m_rename)
-    kept = [m for m in data_renamed.columns.values if m.split('_')[-1]!='NA']
-    data_renamed = data_renamed[kept]
-    data_collapsed = data_renamed.T.groupby(data_renamed.columns).sum().T
-
-    print(f'Dataset has {data_renamed.shape[1]} named metabolites')
-
-    meta_df = meta_df.rename(index=m_rename)
-    meta_df = meta_df.loc[~meta_df.index.duplicated(),:]
-    # new_fran = copy.deepcopy(dataset)
-    # new_fran['X'] = data_collapsed
-    # new_fran['distances'] = new_fran['distances'].rename(columns=m_rename).rename(index=m_rename)
-    # new_fran['distances'] = new_fran['distances'].loc[
-    #     ~new_fran['distances'].index.duplicated(), ~new_fran['distances'].columns.duplicated()]
-    #
-    # new_fran['taxonomy'] = new_fran['taxonomy'].rename(columns=m_rename)
-    # new_fran['taxonomy'] = new_fran['taxonomy'].loc[:, ~new_fran['taxonomy'].columns.duplicated()]
-    # new_fran['variable_names'] = np.unique(new_fran['X'].columns.values)
-    print(f'Collapsed dataset has {data_collapsed.shape[1]} named metabolites')
-    return data_collapsed, meta_df
-
-
-def collapse_dataset(dataset):
-    mets = dataset['X'].columns.values
-    m_rename = {m: '__'.join([m.split('_')[0], m.split('__')[-1].split(': ')[-1]]) for m in mets}
-
-    data_renamed = dataset['X'].rename(columns=m_rename)
-    kept = [m for m in data_renamed.columns.values if m.split('_')[-1] != 'NA']
-    data_renamed = data_renamed[kept]
-    data_collapsed = data_renamed.T.groupby(data_renamed.columns).sum().T
-
-    print(f'Dataset has {data_renamed.shape[1]} named metabolites')
-
-    # meta_df = meta_df.rename(index=m_rename)
-    # meta_df = meta_df.loc[~meta_df.index.duplicated(), :]
-    new_fran = copy.deepcopy(dataset)
-    new_fran['X'] = data_collapsed
-    new_fran['distances'] = new_fran['distances'].rename(columns=m_rename).rename(index=m_rename)
-    new_fran['distances'] = new_fran['distances'].loc[
-        ~new_fran['distances'].index.duplicated(), ~new_fran['distances'].columns.duplicated()]
-
-    new_fran['taxonomy'] = new_fran['taxonomy'].rename(columns=m_rename)
-    new_fran['taxonomy'] = new_fran['taxonomy'].loc[:, ~new_fran['taxonomy'].columns.duplicated()]
-    new_fran['variable_names'] = np.unique(new_fran['X'].columns.values)
-    print(f'Collapsed dataset has {data_collapsed.shape[1]} named metabolites')
-    return new_fran
-
-
-
-def collate(gs):
-    return dgl.batch(gs)
 
 def ncr(n, r):
     r = min(r, n-r)
@@ -228,15 +124,6 @@ def make_16s_tree(seq_config, sequences, sequence_data, save_path):
         raise FileNotFoundError("No newick tree in output folder. Check to make sure phylo placement ran.")
 
     return sequence_tree
-
-def collapse_by_genus(sequence_data):
-    gen_names = [f.split('g__')[0] + 'g__' + re.sub(r'[0-9]', '', f.split('g__')[1].split('_')[0].split('-')[0]) for f
-                 in
-                 sequence_data.columns.values]
-    mdata_collapsed = sequence_data.copy()
-    mdata_collapsed.columns = gen_names
-    sequence_data = mdata_collapsed.groupby(lambda x: x, axis=1).sum()
-    return sequence_data
 
 def get_asv_labels(taxa_strings):
     return {taxa_strings[i]: f'ASV {i}' for i in range(len(taxa_strings))}
@@ -312,6 +199,63 @@ def collapse_nodes_short(tree, nodes_to_collapse):
                 node.detach()
             parent.add_child(name=same_nodes, dist=np.mean(node_dists))
 
+def make_taxonomic_tree(taxonomy, save_path):
+    print('\nMaking tree from taxonomy')
+    names_to_nodes = {}
+    if isinstance(taxonomy, list) or isinstance(taxonomy, np.ndarray):
+        taxonomy = [t.replace('|',';') for t in taxonomy]
+        kingdom = "k__Bacteria"
+    elif isinstance(taxonomy, pd.DataFrame):
+        kingdom = "k__Bacteria"
+        tmp = []
+        taxonomy = taxonomy.fillna('NA')
+        for c in taxonomy.columns.values:
+            series = taxonomy[c].values
+
+            sls = ['k','p','c','o','f','g','s']
+            ser_ls = [f"{sls[i]}__{series[i]}" for i in range(len(series))]
+            ser_ls[-1] = ser_ls[-1] + ', ' + c
+            ser_str = ";".join(ser_ls)
+            tmp.append(ser_str)
+
+        taxonomy=tmp.copy()
+
+    for name in taxonomy:
+        names_to_nodes[name] = ete3.TreeNode(name=name, dist=1.0)
+    nodes = copy.copy(np.unique(taxonomy)).tolist()
+
+    i=0
+    while (len(nodes))>0:
+        k=nodes.pop()
+        v=names_to_nodes[k]
+        taxa = k.split(';')
+        parent = ';'.join(taxa[:-1])
+        if len(taxa)==1:
+            parent = taxa[0]
+            print(taxa)
+            print(parent)
+        if parent in names_to_nodes.keys():
+            parent_node=names_to_nodes[parent]
+        else:
+            parent_node = ete3.Tree(name=parent, dist=1.0)
+            names_to_nodes[parent] = parent_node
+        if k not in [n.name for n in parent_node.children]:
+            parent_node.add_child(v)
+            if len(taxa)>2:
+                nodes.append(parent)
+    sequence_tree = names_to_nodes[kingdom]
+    disp_tree = sequence_tree.copy()
+    families = np.unique([n.split(';')[-2] for n in taxonomy])
+    colors = ete3.random_color(num=len(families))
+    cdict = {f:c for f,c in zip(families,colors)}
+    for n in disp_tree.iter_leaves():
+        n.add_face(ete3.TextFace(n.name.split(';')[-1], fgcolor=cdict[n.name.split(';')[-2]]), column=0, position='branch-top')
+    ts = ete3.TreeStyle()
+    ts.show_leaf_name = True
+    # disp_tree.render(save_path+'/taxonomic_tree.pdf', tree_style=ts)
+
+    sequence_tree.write(features=['name'], outfile=save_path + '/taxonomic_tree.nhx', format=0)
+    return sequence_tree, None
 def make_wgs_tree(taxa_strings_list, reference_tree='./utilities/mpa_vJan21.nwk.txt', reference_mapper='./utilities/mpa_vJan21_CHOCOPhlAnSGB_202103_SGB2GTDB.tsv'):
     is_genera_bool = all([len(t.split(';')) == 6 for t in taxa_strings_list]) or all([len(t.split('|')) == 6 for t in taxa_strings_list])
     if ';' in taxa_strings_list[0]:
@@ -320,7 +264,7 @@ def make_wgs_tree(taxa_strings_list, reference_tree='./utilities/mpa_vJan21.nwk.
         delim = '|'
     if reference_mapper is None:
         keep_nodes = taxa_strings_list
-        tree = ete4.Tree(reference_tree)
+        tree = ete3.Tree(reference_tree)
         try:
             tree.prune(keep_nodes, preserve_branch_length=True)
         except:
@@ -349,7 +293,7 @@ def make_wgs_tree(taxa_strings_list, reference_tree='./utilities/mpa_vJan21.nwk.
         print(f'{len(taxa_strings_list)} taxa to map to tree')
         taxa_labels = read_ctsv(reference_mapper, header=None, index_col=None)
         taxa_labels.iloc[:,1] = taxa_labels.iloc[:,1].str.replace('|',';')
-        tree = ete4.Tree(reference_tree,quoted_node_names=True, format=1)
+        tree = ete3.Tree(reference_tree,quoted_node_names=True, format=1)
 
         # is_genera_bool = all([len(t.split(';'))==6 for t in taxa_strings_list])
         if is_genera_bool:
@@ -477,20 +421,6 @@ def make_wgs_tree(taxa_strings_list, reference_tree='./utilities/mpa_vJan21.nwk.
                 sp_parent = taxa_to_node[sp_sm]
                 sp_parent.add_child(name=sp, dist=sp_dist)
 
-        # assert(set([t.name for t in tree.traverse() if t.is_leaf()]) == set(taxa_strings_list))
-        # families = np.unique([n.split(';')[-2] for n in taxa_strings_list])
-        # colors = ete3.random_color(num=len(families))
-        # cdict = {f:c for f,c in zip(families,colors)}
-        # for n in tree.traverse():
-        #     if n.is_leaf():
-        #         n.add_face(ete3.TextFace(n.name.split(';')[-1], fgcolor=cdict[n.name.split(';')[-2]]), column=0, position='branch-top')
-        #     else:
-        #         n.name = n.name.split(';')[-1]
-        # ts = ete3.TreeStyle()
-        # ts.show_leaf_name = True
-        # disp_tree.render(save_path+'/tree_for_WGS.pdf', tree_style=ts)
-        # plt.close()
-        # tree.write(features=['name'], outfile=save_path + '/sequence_tree.nhx', format=0)
         return tree, ref_dict
 
 def clean_labels(taxa_to_label):
@@ -524,50 +454,6 @@ def relabel_tree(tree, label_to_clean_label):
             else:
                 t.name = label_to_clean_label[t.name]
     return tree
-
-
-# def make_wgs_tree(sequence_data, save_path):
-#     print('\nMaking WGS tree')
-#     names_to_nodes = {}
-#     for name in sequence_data.columns:
-#         names_to_nodes[name] = ete3.TreeNode(name=name, dist=1.0)
-#     nodes = copy.copy(np.unique(sequence_data.columns.values)).tolist()
-#     i=0
-#     while (len(nodes))>0:
-#         k=nodes.pop()
-#         v=names_to_nodes[k]
-#         taxonomy = k.split(';')
-#         parent = ';'.join(taxonomy[:-1])
-#         if len(taxonomy)==1:
-#             parent = taxonomy[0]
-#             print(len(nodes))
-#         if parent in names_to_nodes.keys():
-#             parent_node=names_to_nodes[parent]
-#         else:
-#             parent_node = ete3.Tree(name=parent, dist=1.0)
-#             names_to_nodes[parent] = parent_node
-#         if k not in [n.name for n in parent_node.children]:
-#             parent_node.add_child(v)
-#             if len(taxonomy)>2:
-#                 nodes.append(parent)
-#
-#     sequence_tree = names_to_nodes['d__Bacteria']
-#     disp_tree = sequence_tree.copy()
-#
-#     families = np.unique([n.split(';')[-2] for n in sequence_data.columns.values])
-#     colors = ete3.random_color(num=len(families))
-#     cdict = {f:c for f,c in zip(families,colors)}
-#     for n in disp_tree.traverse():
-#         if n.is_leaf():
-#             n.add_face(ete3.TextFace(n.name.split(';')[-1], fgcolor=cdict[n.name.split(';')[-2]]), column=0, position='branch-top')
-#         else:
-#             n.name = n.name.split(';')[-1]
-#     ts = ete3.TreeStyle()
-#     ts.show_leaf_name = True
-#     disp_tree.render(save_path+'/tree_for_WGS.pdf', tree_style=ts)
-#     plt.close()
-#     sequence_tree.write(features=['name'], outfile=save_path + '/sequence_tree.nhx', format=0)
-#     return sequence_tree
 
 def get_sequence_distance_matrix(sequence_data, sequence_tree):
     print('\nObtaining sequence data distances')
@@ -606,10 +492,7 @@ def get_epsilon(data):
     return epsilon
 
 def transform_func(data_train, data_test=None, standardize_from_training_data=True, log_transform=True):
-    # data_trans = (data - np.mean(data.values, 0) + 1e-10
-    #                         ) / (np.std(data.values, 0) + 1e-10)
-    # eps = get_epsilon(data_train)
-    # data_train = np.log(data_train + 1)
+
     if log_transform:
         eps = get_epsilon(data_train)
         data_train = np.log(data_train + eps)
@@ -761,7 +644,7 @@ def get_met_keys(metab_df, key_type='InChIKey'):
     subproc_before = set([p.pid for p in current_process.children(recursive=True)])
     print(f"{sum(~res_df[out_id.lower()].isna())} metabolites ID'd with {out_id}")
     if out_id!=key_type:
-        res_df=pd.DataFrame(get_pubchem_something(res_df, out_id.lower(), out_type=key_type))
+        res_df=pd.DataFrame(get_intermediate_ids_from_pubchempy(res_df, out_id.lower(), out_type=key_type))
     subproc_after = set([p.pid for p in current_process.children(recursive=True)])
     for subproc in subproc_after - subproc_before:
         print('Killing process with pid {}'.format(subproc))
@@ -772,180 +655,6 @@ def get_met_keys(metab_df, key_type='InChIKey'):
         return metab_df.join(res_df,how='left')
     except:
         return metab_df
-
-def add_family_names_to_tree(dataset, features):
-    in_feats = features
-    taxonomy = dataset['taxonomy']
-    query_parent_dict = {}
-    # tree.prune(in_feats, preserve_branch_length=True)
-    # query_parent_dict['COMPOUNDS'] = {}
-    weights_dict = {}
-    taxonomy=taxonomy.T
-    it = 0
-    for taxa in in_feats:
-        classification = taxonomy.loc[taxa].dropna()
-        it += 1
-        for l in np.arange(1, len(classification)):
-            if classification.iloc[l - 1].upper() not in query_parent_dict.keys():
-                query_parent_dict[classification.iloc[l - 1].upper()] = [
-                    classification.iloc[l].upper()]
-            else:
-                if classification.iloc[l].upper() not in query_parent_dict[
-                    classification.iloc[l - 1].upper()]:
-                    query_parent_dict[classification.iloc[l - 1].upper()].append(
-                        classification.iloc[l].upper())
-        if 'COMPOUNDS' not in query_parent_dict.keys():
-            query_parent_dict['COMPOUNDS'] = [classification.iloc[0].upper()]
-        else:
-            if classification.iloc[0].upper() not in query_parent_dict['COMPOUNDS']:
-                query_parent_dict['COMPOUNDS'].append(classification.iloc[0].upper())
-        if classification.iloc[-1].upper() not in query_parent_dict.keys():
-            query_parent_dict[classification.iloc[-1].upper()] = [taxa]
-        else:
-            query_parent_dict[classification.iloc[-1].upper()].append(taxa)
-
-    # root = query_parent_dict[None][0]
-    root = 'COMPOUNDS'
-    query_root = ete3.TreeNode(name=root)
-    parents, added = [query_root], set([root])
-    while parents:
-        nxt = parents.pop()
-        child_nodes = {child: ete3.TreeNode(name=child) for child in query_parent_dict[nxt.name]}
-        for child in query_parent_dict[nxt.name]:
-            nxt.add_child(child_nodes[child], name=child, dist=1)
-            if child not in added:
-                if child in query_parent_dict.keys():
-                    parents.append(child_nodes[child])
-                added.add(child)
-    query_root.write(format=1, outfile="new_tree.nw")
-
-def get_map4_fingerprint(df):
-    fv=[]
-    indices=[]
-    dfn=df.fillna(np.nan)
-    df=dfn.fillna('')
-    for k in df.index.values:
-
-        ii=df[k]
-        if ii is None or len(ii)==0:
-            fv.append(None)
-            indices.append(None)
-        else:
-            # try:
-            fa=MAP4.calculate(Chem.MolFromSmiles(ii))
-            # fa = Chem.MolFromSmiles(ii)
-            # except:
-            #     continue
-            fv.append(fa)
-            indices.append(k)
-            # import pdb; pdb.set_trace()
-    return pd.Series(fv, index=indices, name='fingerprints')
-
-def get_mhfp_fingerprint(df):
-    mhfp_encoder = MHFPEncoder()
-    fv=[]
-    indices=[]
-    dfn=df.fillna(np.nan)
-    df=dfn.fillna('')
-    for k in df.index.values:
-        ii=df[k]
-        if ii is None or len(ii)==0:
-            fv.append(None)
-            indices.append(None)
-        else:
-            try:
-                fa=mhfp_encoder.encode(ii)
-            except:
-                continue
-            fv.append(fa)
-            indices.append(k)
-    return pd.Series(fv, index=indices, name='fingerprints')
-
-def get_mxfp_fingerprint(df):
-    MXFP = mxfp.MXFPCalculator()
-    fv=[]
-    indices=[]
-    for k in df.index.values:
-        ii=df[k]
-        if ii is None or len(ii)==0:
-            fv.append(None)
-            indices.append(None)
-        else:
-            try:
-                fa=MXFP.mxfp_from_smiles(ii)
-            except:
-                continue
-            fv.append(fa)
-            indices.append(k)
-    return pd.Series(fv, index=indices, name='fingerprints')
-
-def get_infomax_fingerprint(inchi_df):
-    graphs = []
-    mets=[]
-    for met, inchi in inchi_df.items():
-        if not isinstance(inchi, str):
-            continue
-        mol = Chem.MolFromInchi(inchi)
-        if mol is None:
-            continue
-        g = mol_to_bigraph(mol, add_self_loop=True,
-                           node_featurizer=PretrainAtomFeaturizer(),
-                           edge_featurizer=PretrainBondFeaturizer(),
-                           canonical_atom_order=True)
-        graphs.append(g)
-        mets.append(met)
-
-    model = load_pretrained('gin_supervised_infomax');  # contextpred infomax edgepred masking
-    model.to('cpu')
-    model.eval()
-
-    data_loader = DataLoader(graphs, batch_size=256, collate_fn=collate, shuffle=False)
-
-    readout = AvgPooling()
-
-    mol_emb = []
-    for batch_id, bg in enumerate(data_loader):
-        bg = bg.to('cpu')
-        nfeats = [bg.ndata.pop('atomic_number').to('cpu'),
-                  bg.ndata.pop('chirality_type').to('cpu')]
-        efeats = [bg.edata.pop('bond_type').to('cpu'),
-                  bg.edata.pop('bond_direction_type').to('cpu')]
-        with torch.no_grad():
-            node_repr = model(bg, nfeats, efeats)
-        mol_emb.append(readout(bg, node_repr))
-    mol_emb = torch.cat(mol_emb, dim=0).detach().cpu().numpy()
-    fingerprint_df = pd.DataFrame(mol_emb, index=mets)
-    # dist_mat_df = pd.DataFrame(squareform(pdist(mol_emb)), index=mets, columns=mets)
-    return fingerprint_df
-
-def get_rdkit_fingerprint(inchi_df, ftype):
-    new_f=[]
-    indices=[]
-    ftype=ftype.lower()
-    for k in inchi_df.index.values:
-        i=inchi_df[k]
-        if i is not None and isinstance(i, str):
-            try:
-                mol=MolFromInchi(i)
-            except:
-                print(f"error when converting {i} to molecule in rdkit")
-                continue
-            if mol is None:
-                continue
-            if ftype=='rdkit':
-                fa = Chem.RDKFingerprint(mol)
-            if ftype=='morgan':
-                fa = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=1024)
-            if ftype=='mqn':
-                fa = rdMolDescriptors.MQNs_(mol)
-            else:
-                ValueError('Please specify either "morgan", "rdkit", or "mqn" as fingerprint type option!')
-            new_f.append(fa)
-            indices.append(k)
-        else:
-            new_f.append(None)
-            indices.append(k)
-    return pd.Series(new_f, index=indices, name='fingerprints')
 
 def call_pubchem(inchi_key, met, key_type, ii = None):
     if ii is not None:
@@ -965,11 +674,7 @@ def call_pubchem(inchi_key, met, key_type, ii = None):
     else:
         return {met:None}
 
-
-def get_pubchem_something(met_df, key_type, out_type='fingerprints'):
-    # inchi_ls = inchi_df.values
-    # print(inchi_ls)
-    # print(key_type)
+def get_intermediate_ids_from_pubchempy(met_df, key_type, out_type='fingerprints'):
     met_df_ = copy.deepcopy(met_df)
     pouts = []
     TIME=time.time()
@@ -979,15 +684,6 @@ def get_pubchem_something(met_df, key_type, out_type='fingerprints'):
             while time.time()-TIME<1:
                 time.sleep(0.1)
             TIME=time.time()
-
-    # current_process = psutil.Process()
-    # subproc_before = set([p.pid for p in current_process.children(recursive=True)])
-    # pouts = Parallel(n_jobs=10)(delayed(call_pubchem)(i, met, key_type, ii)
-    #                                             for ii, (met,i) in enumerate(met_df_[key_type].items()))
-    # subproc_after = set([p.pid for p in current_process.children(recursive=True)])
-    # for subproc in subproc_after - subproc_before:
-    #     print('Killing process with pid {}'.format(subproc))
-    #     psutil.Process(subproc).terminate()
 
     f_save={}
     p_tries=10
@@ -1039,60 +735,17 @@ def get_pubchem_something(met_df, key_type, out_type='fingerprints'):
     fseries=pd.Series(f_save,name=out_type.lower())[met_df.index.values]
     return fseries
 
-def tanimoto(a, b):
-    both = len(np.where((a + b) > 1)[0])
-    return both / ((np.sum(a) + np.sum(b)) - both)
-
-def get_dist_mat(fingerprint_dict, ftype='rdkit'):
-    if ftype=='pubchem':
-        ndict = {}
-        for k, v in fingerprint_dict.items():
-            if v is None or v is np.nan:
-                continu
-            ndict[k] = np.fromstring(v, 'u1') - ord('0')
-        fdf = pd.DataFrame(ndict).T
-        dist_df = pd.DataFrame(squareform(pdist(fdf.values, metric='jaccard')), index=fdf.index.values, columns=fdf.index.values)
-    else:
-        dist_dict = {}
-        for m1, m2 in itertools.combinations(fingerprint_dict.keys(), 2):
-            if fingerprint_dict[m1] is None or fingerprint_dict[m2] is None:
-                continue
-            if np.isnan(fingerprint_dict[m1]).any() or np.isnan(fingerprint_dict[m2]).any():
-                continue
-            # if np.isnan(fingerprint_dict[m1]) or np.isnan(fingerprint_dict[m2]):
-            #     continue
-            if m1 not in dist_dict.keys():
-                dist_dict[m1] = {}
-                dist_dict[m1][m1]=0
-            if m2 not in dist_dict.keys():
-                dist_dict[m2] = {}
-                dist_dict[m2][m2]=0
-            if ftype=='rdkit' or ftype=='morgan':
-                sim=DataStructs.FingerprintSimilarity(fingerprint_dict[m1], fingerprint_dict[m2])
-                dist=1-sim
-            elif ftype=='mqn':
-                dist=cityblock(fingerprint_dict[m1],fingerprint_dict[m2])
-            elif ftype=='mhfp':
-                dist = MHFPEncoder.distance(m1,m2)
-            elif ftype=='map4':
-                dist = ENC.get_distance(fingerprint_dict[m1], fingerprint_dict[m2])
-            else:
-                sim = tanimoto(np.fromstring(fingerprint_dict[m1], 'u1') - ord('0'), np.fromstring(fingerprint_dict[m2], 'u1') - ord('0'))
-                dist=1-sim
-
-            dist_dict[m1][m2] = dist
-            dist_dict[m2][m1] = dist
-        dist_df = pd.DataFrame(dist_dict)
-        dist_df = dist_df / dist_df.max().max()
-    return dist_df
-
-def get_metabolite_tree_from_classifications(metabolite_classifications):
-    print('\nGetting metabolite tree')
-    met_classes = metabolite_classifications.T
+def add_family_names_to_tree(dataset, features):
+    in_feats = features
+    taxonomy = dataset['taxonomy']
     query_parent_dict = {}
+    # tree.prune(in_feats, preserve_branch_length=True)
+    # query_parent_dict['COMPOUNDS'] = {}
+    weights_dict = {}
+    taxonomy=taxonomy.T
     it = 0
-    for met in met_classes.index.values:
-        classification = met_classes.loc[met].dropna()
+    for taxa in in_feats:
+        classification = taxonomy.loc[taxa].dropna()
         it += 1
         for l in np.arange(1, len(classification)):
             if classification.iloc[l - 1].upper() not in query_parent_dict.keys():
@@ -1108,6 +761,53 @@ def get_metabolite_tree_from_classifications(metabolite_classifications):
         else:
             if classification.iloc[0].upper() not in query_parent_dict['COMPOUNDS']:
                 query_parent_dict['COMPOUNDS'].append(classification.iloc[0].upper())
+        if classification.iloc[-1].upper() not in query_parent_dict.keys():
+            query_parent_dict[classification.iloc[-1].upper()] = [taxa]
+        else:
+            query_parent_dict[classification.iloc[-1].upper()].append(taxa)
+
+    # root = query_parent_dict[None][0]
+    root = 'COMPOUNDS'
+    query_root = ete3.TreeNode(name=root)
+    parents, added = [query_root], set([root])
+    while parents:
+        nxt = parents.pop()
+        child_nodes = {child: ete3.TreeNode(name=child) for child in query_parent_dict[nxt.name]}
+        for child in query_parent_dict[nxt.name]:
+            nxt.add_child(child_nodes[child], name=child, dist=1)
+            if child not in added:
+                if child in query_parent_dict.keys():
+                    parents.append(child_nodes[child])
+                added.add(child)
+    query_root.write(format=1, outfile="new_tree.nw")
+
+def get_metabolite_tree_from_classifications(metabolite_classifications):
+    print('\nGetting metabolite tree')
+    met_classes = metabolite_classifications.T
+    query_parent_dict = {}
+    it = 0
+    for met in met_classes.index.values:
+        if pd.isna(met):
+            continue
+        classification = met_classes.loc[met].dropna()
+        it += 1
+        for l in np.arange(1, len(classification)):
+            if classification.iloc[l - 1].upper() not in query_parent_dict.keys():
+                query_parent_dict[classification.iloc[l - 1].upper()] = [
+                    classification.iloc[l].upper()]
+            else:
+                if classification.iloc[l].upper() not in query_parent_dict[
+                    classification.iloc[l - 1].upper()]:
+                    query_parent_dict[classification.iloc[l - 1].upper()].append(
+                        classification.iloc[l].upper())
+        if 'COMPOUNDS' not in query_parent_dict.keys():
+            query_parent_dict['COMPOUNDS'] = [classification.iloc[0].upper()]
+        else:
+            try:
+                if classification.iloc[0].upper() not in query_parent_dict['COMPOUNDS']:
+                    query_parent_dict['COMPOUNDS'].append(classification.iloc[0].upper())
+            except:
+                print('debug')
         if classification.iloc[-1].upper() not in query_parent_dict.keys():
             query_parent_dict[classification.iloc[-1].upper()] = [met]
         else:

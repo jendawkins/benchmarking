@@ -9,19 +9,13 @@ import numpy as np
 import pandas as pd
 import os
 try:
-    import ete4
+    import ete3
 except:
     try:
-        import ete3 as ete4
+        import ete4 as ete3
     except:
         pass
 
-import pickle as pklF
-import time
-import argparse
-# from helper import *
-import sys
-import shutil
 
 import sys, os
 sys.path.append(os.path.abspath(".."))
@@ -32,21 +26,17 @@ class ProcessData:
         # Open config file
         self.config = configparser.RawConfigParser(interpolation=configparser.ExtendedInterpolation())
         self.config.read(config_filename)
-        self.fingerprint_options=['pubchem','infomax','map4','rdkit','morgan','mqn','mhfp','mxfp']
 
-        if 'metabolite_data' in self.config and 'fingerprint_type' in self.config['metabolite_data'] and 'week' not in self.config['description']['tag']:
-            if self.config['metabolite_data']['fingerprint_type'].lower() not in self.config['description']['tag'].lower():
-                if self.config['description']['tag'].split('_')[-1].lower() in self.fingerprint_options:
-                    raise Warning('different fingerprint name in tag than fingerprint specified in "fingerprint_type". Make sure tag/fingerprint_type is correct!')
+        # Create folder to save datasets in. Folder will be in 'out_path' with the name <tag>_<fingerprint>_<week>.
+        # If "out_path" is not specified, defaults to current working directory
+        if 'out_path' in self.config['description'] and self.config['description']['out_path'] is not None:
+            self.save_path=self.config['description']['out_path'] + self.config['description']['tag']
+        if 'out_path' not in self.config['description'] or self.config['description']['out_path'] is None:
+            self.config['description']['out_path'] = os.getcwd()
 
-
-        # Create folder to save datasets in. Folder will be in 'out_path' with the name <tag>_<fingerprint>_<week>
-        self.save_path=self.config['description']['out_path'] + self.config['description']['tag']
+        self.save_path = self.config['description']['out_path'] + self.config['description']['tag']
         if not os.path.isdir(self.config['description']['out_path']):
             os.mkdir(self.config['description']['out_path'])
-        if 'metabolite_data' in self.config and 'fingerprint' in self.config['metabolite_data'] and \
-                self.config['metabolite_data']['fingerprint'] is not None:
-            self.save_path += '_' + self.config['metabolite_data']['fingerprint']
 
         if not os.path.isdir(self.save_path):
             os.mkdir(self.save_path)
@@ -56,16 +46,16 @@ class ProcessData:
         with open(self.save_path + '/' + config_filename.split('/')[-1], 'w') as f:
             self.config.write(f)
 
-        if 'input_path' in self.config['data'] and self.config['data']['input_path'] is not None:
-            self.in_path = self.config['data']['input_path']
+        if 'in_path' in self.config['description'] and self.config['description']['in_path'] is not None:
+            self.in_path = self.config['description']['in_path']
         else:
             self.in_path = os.getcwd()
 
         # load subject data
-        self.Y, self.subject_data, self.subject_IDs = self.load_subject_data(self.config['data'])
+        self.Y, self.subject_data, self.subject_IDs = self.load_subject_data(self.config['meta_data'])
 
         # If additional_subject_covariates, check to make sure covariates are in subject data
-        if 'additional_subject_covariates' in self.config['data'] and self.config['data']['additional_subject_covariates']!='':
+        if 'additional_subject_covariates' in self.config['meta_data'] and self.config['meta_data']['additional_subject_covariates']!='':
             self.check_additional_subj_covariates(self.config['data']['additional_subject_covariates'])
 
 
@@ -78,9 +68,8 @@ class ProcessData:
                 self.sequence_data, self.sequences = self.load_16s_data(self.config['sequence_data']['data'])
             elif self.data_type=='wgs':
                 self.sequence_data, self.sequences = self.load_wgs_data(self.config['sequence_data']['data'])
-                self.metaphlan = True
-                # if all([len(s.split(';')) >=6 for s in self.sequence_data.columns.values]):
-                #     self.metaphlan = True
+                if all([len(s.split(';')) >=6 for s in self.sequence_data.columns.values]) or all([len(s.split('|')) >=6 for s in self.sequence_data.columns.values]):
+                    self.taxonomy_in_columns = True
             else:
                 raise ValueError('Please provide valid data type for sequence data. Options are "16s" and "WGS".')
 
@@ -95,23 +84,10 @@ class ProcessData:
                     if 'transformations' in self.config['sequence_preprocessing'] and \
                             self.config['sequence_preprocessing']['transformations'] is not None:
                         self.transform_sequence_data()
+                    self.sequence_preprocessing={}
                 else:
-                    # Filter out OTUs present in 1 or fewer participants so that getting phylogenetic distances doesn't
-                    # take so long (these would be filtered out during training regardless of test/train split)
-                    ppi_conservative = np.ceil((1/(self.subject_data.shape[0]))*100)
-                    if 'limit_of_detection' in self.config['sequence_preprocessing'] and self.config['sequence_preprocessing']['limit_of_detection']!='':
-                        lod=float(self.config['sequence_preprocessing']['limit_of_detection'])
-                    else:
-                        lod=0
                     orig_num=self.sequence_data.shape[1]
-                    self.sequence_data = filter_by_presence_func(self.sequence_data,
-                                                                 perc_present_in=ppi_conservative, limit_of_detection=lod)
                     self.sequence_preprocessing=self.get_filtering_parameters(self.config['sequence_preprocessing'])
-                    print(f'Conservatively filtered microbes from {orig_num} to {self.sequence_data.shape[1]} present in '
-                          f'less than 1% of the {self.sequence_data.shape[0]} participants '
-                          f'to save time finding phylogenetic distances.')
-
-                    # if 'transformations' in self.config['sequence_preprocessing'] and self.config['sequence_preprocessing']['transformations'] is not None:
 
             if self.data_type=='wgs':
                 self.taxa_strings = self.sequence_data.columns.values
@@ -120,61 +96,57 @@ class ProcessData:
 
             if 'tree' in self.config['sequence_data'] and self.config['sequence_data']['tree'] != '':
                 # If tree is specified in sequence file, just load tree
-                self.sequence_tree = ete4.Tree(self.config['sequence_data']['tree'])
+                self.sequence_tree = ete3.Tree(self.config['sequence_data']['tree'])
+
             elif self.data_type=='wgs':
                 print('\nMaking WGS tree')
                 # Make WGS sequence tree (need to update this to make real tree!!)
-                if self.metaphlan==True:
+                if self.taxonomy_in_columns==True:
                     if 'reference_tree' not in self.config['sequence_data'] or self.config['sequence_data']['reference_tree'] =='':
-                        ImportError('No reference tree file found. Please provide a reference tree file if using WGS')
-                    if 'reference_mapper' not in self.config['sequence_data'] or self.config['sequence_data']['reference_mapper'] =='':
-                        reference_mapper=None
+                        warnings.warn("No reference tree provided, cannot make phylogenetic tree. Making tree based on taxonomy, with branch length set to 1")
+                        tree, self.reference_dict = make_taxonomic_tree(self.taxa_strings, self.save_path)
+                        self.sequence_tree = relabel_tree(tree, self.seq_label_dict)
                     else:
-                        reference_mapper=self.config['sequence_data']['reference_mapper']
-                    tree, self.reference_dict = make_wgs_tree(self.taxa_strings,self.config['sequence_data']['reference_tree'],
-                                         reference_mapper)
-                    self.sequence_tree = relabel_tree(tree, self.seq_label_dict)
-                    with open(self.save_path + '/sequence_tree.nhx', 'w') as f:
-                        f.write(self.sequence_tree.write(format=0))
+                        reference_tree = self.config['sequence_data']['reference_tree']
+                        if 'reference_mapper' not in self.config['sequence_data'] or self.config['sequence_data']['reference_mapper'] =='':
+                            reference_mapper=None
+                        else:
+                            reference_mapper=self.config['sequence_data']['reference_mapper']
+                        tree, self.reference_dict = make_wgs_tree(self.taxa_strings,reference_tree,
+                                             reference_mapper)
+                        self.sequence_tree = relabel_tree(tree, self.seq_label_dict)
+                        with open(self.save_path + '/sequence_tree.nhx', 'w') as f:
+                            f.write(self.sequence_tree.write(format=0))
                 else:
-                    raise KeyError('If WGS data is not from metaphlan (and formatted with taxa strings as column labels), a pre-made tree must be provided')
+                    self.sequence_tree = []
+                    warnings.warn('No phylogenetic or taxonomic tree in output dataset. (If WGS data is not formatted with taxa strings as column labels, a reference tree must be provided). ')
 
-            elif self.data_type=='16s':
-                # else, if data type is 16s and 16s sequences are provided (either in config file or as column names in sequence data), make 16s tree
-                if 'sequences' in self.config['sequence_data'] and self.config['sequence_data']['sequences']!='' and self.sequences is not None:
-                    self.sequence_tree=make_16s_tree(self.config['sequence_data']['sequences'], self.sequences, self.sequence_data, self.save_path)
 
-                else:
-                    # sequence_names = [f'ASV {i}' for i in range(self.sequences.shape[1])]
-                    # seq_df = pd.Series(self.sequences.columns.values, index = sequence_names)
-                    self.sequences.to_csv(os.path.join(self.save_path,'sequences.csv'))
-                    self.sequence_tree = make_16s_tree(os.path.join(self.save_path,'sequences.csv'), self.sequences,
-                                                       self.sequence_data, self.save_path)
-                    # Otherwise, ask user to provide sequences
-                    # raise KeyError(
-                    #     'No sequence or tree file was provided. A file mapping bacteria names to sequences or a tree '
-                    #     'file in newick format is required for '
-                    #     '16s data. Please provide "sequences="<filename> or "tree"=<filename> under section "sequence data"')
 
-            # If distance matrix isn't provided, get distances from tree
-            if 'distance_matrix' not in self.config['sequence_data'] or self.config['sequence_data']['distance_matrix']=='':
-                self.sequence_dist_df = get_sequence_distance_matrix(self.sequence_data, self.sequence_tree)
-                self.sequence_dist_df.to_csv(self.save_path+'/seq_dist.csv')
-            # Otherwise load distance matrix
-            else:
-                self.sequence_dist_df = pd.read_csv(self.config['sequence_data']['distance_matrix'], index_col=0)
-
-            print(f'{self.sequence_dist_df.shape[0]} taxa have associated distances')
-            if 'keep_sequences_without_distances' in self.config['sequence_data'] and self.config['sequence_data']['keep_sequences_without_distances'].lower()=='true':
-                print(f'{self.sequence_data.shape[1] - self.sequence_dist_df.shape[0]} taxa without associated distances will not be removed from sequence dataset')
-            else:
-                self.sequence_data = self.sequence_data[self.sequence_dist_df.index.values]
             # If taxonomy provided,
             self.taxonomy=None
             if 'taxonomy' in self.config['sequence_data'] and self.config['sequence_data']['taxonomy']!='':
                 self.taxonomy=self.format_16s_taxonomy(self.config['sequence_data']['taxonomy'])
-            elif self.metaphlan==True:
+            elif self.taxonomy_in_columns==True:
                 self.taxonomy=get_taxa_df_from_strings(self.taxa_strings, self.seq_label_dict, self.reference_dict)
+
+            if self.data_type == '16s':
+                # else, if data type is 16s and 16s sequences are provided (either in config file or as column names in sequence data), make 16s tree
+                try:
+                    if 'rna_sequence_strings' in self.config['sequence_data'] and self.config['sequence_data'][
+                        'rna_sequence_strings'] != '':
+                        self.sequence_tree = make_16s_tree(self.config['sequence_data']['rna_sequence_strings'],
+                                                           self.sequences, self.sequence_data, self.save_path)
+
+                    else:
+                        self.sequences.to_csv(os.path.join(self.save_path, 'sequences.csv'))
+                        self.sequence_tree = make_16s_tree(os.path.join(self.save_path, 'sequences.csv'),
+                                                           self.sequences,
+                                                           self.sequence_data, self.save_path)
+                except:
+                    warnings.warn(
+                        "Pplacer did not run, cannot make phylogenetic tree. Instead, making taxonomic tree with branch lengths=1")
+                    self.sequence_tree, _ = make_taxonomic_tree(self.taxonomy, self.save_path)
 
             self.save_sequence_data_to_pickle()
 
@@ -182,93 +154,46 @@ class ProcessData:
         if 'metabolite_data' in self.config and self.config['metabolite_data']['data']!='':
             # LOAD METABOLITE DATA
             self.load_metabolite_data()
-            self.load_metabolite_meta_data()
-            cols_no_cap = [s.lower() for s in self.metabolite_meta_df.columns.values]
-            self.metabolite_meta_df.columns = cols_no_cap
-            # if 'collapse' in self.config['metabolite_data'] and self.config['metabolite_data']['collapse'].replace(' ','').lower()=='true':
-            #     self.metabolite_data = collapse_metabolites(self.metabolite_data, self.metabolite_meta_df)
+            if 'meta_data' in self.config['metabolite_data'] and self.config['metabolite_data']['meta_data']!='':
+                self.load_metabolite_meta_data()
+                cols_no_cap = [s.lower() for s in self.metabolite_meta_df.columns.values]
+                self.metabolite_meta_df.columns = cols_no_cap
+            else:
+                self.metabolite_meta_df=None
             self.metabolite_preprocessing = None
             self.collapse=True
             if 'metabolite_preprocessing' in self.config:
                 if 'process_before_training' in self.config['metabolite_preprocessing'] and self.config['metabolite_preprocessing']['process_before_training'] == 'True':
-                    # self.metabolite_preprocessing = None
-                    if 'collapse' in self.config['metabolite_data'] and self.config['metabolite_data'][
-                        'collapse'].replace(' ', '').lower() == 'true':
-
-                        self.metabolite_data, self.metabolite_meta_df = collapse_metabolites(self.metabolite_data, self.metabolite_meta_df)
-                        self.collapse = False
                     self.metabolite_data = self.filter_data(self.metabolite_data, self.config['metabolite_preprocessing'], 'metabolites')
                     self.transform_metabolite_data()
+                    self.metabolite_preprocessing={}
                 else:
                     self.metabolite_preprocessing=self.get_filtering_parameters(self.config['metabolite_preprocessing'])
                     if 'transformations' in self.config['metabolite_preprocessing'] and self.config['metabolite_preprocessing']['transformations']!='':
                         self.metabolite_preprocessing['transformations'] = self.config['metabolite_preprocessing']['transformations']
 
 
-            # self.load_metabolite_meta_data()
-            # cols_no_cap = [s.lower() for s in self.metabolite_meta_df.columns.values]
-            # self.metabolite_meta_df.columns = cols_no_cap
-            self.fingerprint=None
-            if 'distance_matrix' in self.config['metabolite_data'] and self.config['metabolite_data']['distance_matrix']!='':
-                self.metabolite_dist_df = read_ctsv(self.config['metabolite_data']['distance_matrix'])
-            elif 'similarity_matrix' not in self.config['metabolite_data'] and self.config['metabolite_data']['similarity_matrix']!='':
-                self.metabolite_dist_df = 1-read_ctsv(self.config['metabolite_data']['similarity_matrix'])
-            else:
-                if 'fingerprint_type' in self.config['metabolite_data'] and self.config['metabolite_data'][
-                    'fingerprint_type']!='':
-                    self.fingerprint = self.config['metabolite_data']['fingerprint_type']
-                else:
-                    self.fingerprint = 'pubchem'
 
-                # define which intermediary is needed to go from HMDB/KEGG to fingerprint
-                if self.fingerprint.lower() == 'pubchem':
-                    self.key_type = 'fingerprints'
-                elif self.fingerprint.lower() == 'rdkit' or self.fingerprint.lower() == 'morgan' \
-                        or self.fingerprint.lower()=='mqn' or self.fingerprint.lower()=='infomax':
-                    self.key_type = 'InChI Code'
-                elif self.fingerprint.lower() == 'mhfp' or self.fingerprint.lower() == 'mxfp' or self.fingerprint.lower()=='map4':
-                    self.key_type = 'SMILES'
-
-                # if fingerprints are in meta data, just get distance matrix
-                if 'fingerprints' in cols_no_cap:
-                    self.get_metabolite_distance_matrix()
-
-                # otherwise, if key type in distance matrix, get fingerprints and then distance matrix
-                elif self.key_type.lower() in cols_no_cap:
-                    self.get_metabolite_fingerprints()
-                    self.get_metabolite_distance_matrix()
-
-                # else, get intermediary IDs (self.key_type) from HMDB/KEGG ids, then get fingerprints, and then get distance matrix
-                elif 'hmdb' in cols_no_cap or 'kegg' in cols_no_cap or 'inchikey' in cols_no_cap:
-                    self.get_metabolite_intermediate_ids(key_type=self.key_type)
-                    self.get_metabolite_fingerprints()
-                    self.get_metabolite_distance_matrix()
-                else:
-                    raise ValueError('Cannot find metabolite fingerprints or IDs in metabolite metadata. '
-                                     'Must provide either "fingerprints", "inchikey", "hmdb", and/or "kegg" ids as '
-                                     'column in metabolite metadata file')
-
-            if 'taxonomy' not in self.config['metabolite_data'] or self.config['metabolite_data']['taxonomy'] is None:
-                if 'skip_taxonomy' in self.config['metabolite_data'] and self.config['metabolite_data']['skip_taxonomy'].lower()=='true':
-                    self.metabolite_classifications = pd.DataFrame(columns = self.metabolite_data.columns.values,
-                                                                   index=['kingdom', 'superclass', 'class', 'subclass',
-                                                                          'level 5', 'level 6','level 7', 'level 8',
-                                                                          'level 9', 'level 10'])
-                else:
-                    if self.key_type!='InChIKey' and 'inchikey' not in self.metabolite_meta_df.columns.values:
-                        self.get_metabolite_intermediate_ids(key_type='InChIKey')
-                    self.get_metabolite_classifications()
-            else:
+            if 'taxonomy' in self.config['metabolite_data'] and self.config['metabolite_data']['taxonomy']!='':
                 self.metabolite_classifications = pd.read_csv(self.config['metabolite_data']['taxonomy'], header=0,
                                                               index_col=0)
-
-            if 'tree' not in self.config['metabolite_data'] or self.config['metabolite_data']['tree'] is None:
-                if 'skip_taxonomy' in self.config['metabolite_data'] and self.config['metabolite_data']['skip_taxonomy'].lower()=='true':
-                    self.metabolite_tree = ete4.Tree()
-                else:
-                    self.get_metabolite_tree()
+            elif self.metabolite_meta_df is None:
+                self.metabolite_classifications = pd.DataFrame(columns=self.metabolite_data.columns.values,
+                                                               index=['kingdom', 'superclass', 'class', 'subclass',
+                                                                      'level 5', 'level 6', 'level 7', 'level 8',
+                                                                      'level 9', 'level 10'])
             else:
-                self.metabolite_tree = ete4.Tree(self.config['metabolite_data']['tree'])
+                if 'inchikey' not in self.metabolite_meta_df.columns.values:
+                    self.get_metabolite_intermediate_ids(key_type='InChIKey')
+                self.get_metabolite_classifications()
+
+
+            if self.metabolite_meta_df is None:
+                self.metabolite_tree = []
+            elif 'tree' not in self.config['metabolite_data'] or self.config['metabolite_data']['tree']=='':
+                self.get_metabolite_tree()
+            else:
+                self.metabolite_tree = ete3.Tree(self.config['metabolite_data']['tree'])
 
             self.save_metabolite_data_to_pickle()
 
@@ -487,66 +412,6 @@ class ProcessData:
             raise KeyError('No meta data file for metabolites in config file. Please include '
                            '"meta_data=<path/to/metabolite_meta_data/>" in config file under section "metabolite_data"')
 
-    def get_metabolite_distance_matrix(self):
-        print('\nObtaining metabolite distance matrix')
-        if 'fingerprint_type' in self.config['metabolite_data'] and \
-            self.config['metabolite_data']['fingerprint_type'].lower()=='infomax':
-            self.metabolite_dist_df = pd.DataFrame(squareform(pdist(self.infomax_df.values)), index=self.infomax_df.index.values,
-                                       columns=self.infomax_df.index.values)
-        else:
-            fingerprint_df = self.metabolite_meta_df['fingerprints']
-            self.metabolite_dist_df = get_dist_mat(fingerprint_df.to_dict(), ftype=self.fingerprint)
-
-        # self.metabolite_dist_df = 1-sim_df
-        m_w_embs = list(set(self.metabolite_dist_df.columns.values).intersection(set(self.metabolite_data.columns.values)))
-        m_wo_embs = list(set(self.metabolite_data.columns.values) - set(m_w_embs))
-        self.metabolite_data = self.metabolite_data[m_w_embs + m_wo_embs]
-        self.metabolite_dist_df=self.metabolite_dist_df[m_w_embs].loc[m_w_embs]
-        print(f'{self.metabolite_dist_df.shape[0]}/{self.metabolite_data.shape[1]} metabolites have embedded locations')
-        self.metabolite_dist_df.to_csv(self.save_path + '/met_dist.csv')
-        fig,ax=plt.subplots(); ax.hist(self.metabolite_dist_df.values.flatten(), bins=20);ax.set_title(self.fingerprint)
-        fig.savefig(self.save_path+'/met_dist.pdf')
-        plt.close(fig)
-
-    def get_metabolite_fingerprints(self):
-        print('\nGetting metabolite fingerprints')
-        if 'fingerprints' in self.config['metabolite_data'] and self.config['metabolite_data']['fingerprints']!='':
-            with open(self.config['metabolite_data']['fingerprints'], 'rb') as f:
-                fdict = pkl.load(f)
-            fingerprint_series = pd.Series(fdict)
-            fingerprint_series.name = 'fingerprints'
-        else:
-            if self.fingerprint is not None:
-                if self.fingerprint.lower()=='rdkit' or self.fingerprint.lower()=='morgan' or self.fingerprint.lower()=='mqn':
-                    fingerprint_series = get_rdkit_fingerprint(self.metabolite_meta_df[self.key_type.lower()],
-                                                               self.fingerprint)
-                elif self.fingerprint.lower()=='mhfp':
-                    fingerprint_series = get_mhfp_fingerprint(self.metabolite_meta_df[self.key_type.lower()])
-                    fingerprint_series.name = 'fingerprints'
-                elif self.fingerprint.lower()=='mxfp':
-                    fingerprint_series = get_mxfp_fingerprint(self.metabolite_meta_df[self.key_type.lower()])
-                    fingerprint_series.name = 'fingerprints'
-                elif self.fingerprint.lower()=='pubchem':
-                    assert('fingerprints' in self.metabolite_meta_df.columns.values)
-                    fingerprint_series = self.metabolite_meta_df['fingerprints'].squeeze()
-                    fingerprint_series.name = 'fingerprints'
-                elif self.fingerprint.lower()=='infomax':
-                    self.infomax_df = get_infomax_fingerprint(self.metabolite_meta_df[self.key_type.lower()])
-                    fingerprint_series = self.infomax_df
-                elif self.fingerprint.lower()=='map4':
-                    fingerprint_series = get_map4_fingerprint(self.metabolite_meta_df[self.key_type.lower()])
-                    fingerprint_series.name = 'fingerprints'
-            else:
-                assert ('fingerprints' in self.metabolite_meta_df.columns.values)
-                fingerprint_series = self.metabolite_meta_df['fingerprints'].squeeze()
-                fingerprint_series.name = 'fingerprints'
-            try:
-                with open(self.save_path + '/fingerprints.pkl', 'wb') as f:
-                    pkl.dump(fingerprint_series.to_dict(), f)
-            except:
-                pass
-        if 'fingerprints' not in self.metabolite_meta_df.columns.values:
-            self.metabolite_meta_df = self.metabolite_meta_df.join(fingerprint_series, how='left')
 
     def get_metabolite_intermediate_ids(self, key_type):
         print(f'\nGetting metabolite {key_type}')
@@ -560,29 +425,12 @@ class ProcessData:
             meta_df_w_inchi['inchikey'].to_csv(self.save_path+'/metabolite_InChIKey_only.csv')
         else:
             self.metabolite_meta_df['inchikey'].to_csv(self.save_path+'/metabolite_InChIKey_only.csv')
-        os.system('Rscript --vanilla ./utilities/get_classy_fire.R "' + self.save_path + '/"' + ' metabolite_InChIKey_only.csv')
+        os.system('Rscript --vanilla ./utilities/get_classy_fire.R ' + self.save_path + '/' + ' metabolite_InChIKey_only.csv')
         self.metabolite_classifications = pd.read_csv(self.save_path+'/classy_fire_df.csv', header=0, index_col=0).T
 
     def get_metabolite_tree(self):
         self.metabolite_tree = get_metabolite_tree_from_classifications(self.metabolite_classifications)
         self.metabolite_tree.write(features=['name'], outfile=self.save_path+'/metabolite_tree.nhx', format=0)
-
-        # colors = ete3.random_color(num=len(self.metabolite_classifications.columns.values))
-        # i=0
-        # for n in self.metabolite_tree.traverse():
-        #     if n.is_leaf():
-        #         n.add_face(ete3.TextFace(n.name, fgcolor=colors[i]), column=0, position='branch-top')
-        #         n.name = ''
-        #         i+=1
-        #     # else:
-        #     #     i += 1
-        # ts = ete3.TreeStyle()
-        # ts.show_leaf_name = True
-        # try:
-        #     self.metabolite_tree.render(self.save_path+'/classification_tree_for_IDd_metabolites.pdf', tree_style=ts)
-        #     plt.close()
-        # except:
-        #     pass
 
     def get_filtering_parameters(self, preprocessing_section):
         preprocessing={}
@@ -599,14 +447,13 @@ class ProcessData:
                 preprocessing_section['cov_percentile'])
         return preprocessing
 
-
     def split_data_from_covariate(self, data_dict):
-        covar_nm = self.config['data']['covariate_variable']
+        covar_nm = self.config['meta_data']['covariate_variable']
         covar = self.subject_data[covar_nm]
         # specified_pos=False
-        if 'covariate_positive_value' in self.config['data'] and self.config['data']['covariate_negative_value']!='':
-            pos_val = self.config['data']['covariate_positive_value']
-            if 'covariate_negative_value' not in self.config['data'] or self.config['data']['covariate_negative_value']=='':
+        if 'covariate_positive_value' in self.config['meta_data'] and self.config['meta_data']['covariate_negative_value']!='':
+            pos_val = self.config['meta_data']['covariate_positive_value']
+            if 'covariate_negative_value' not in self.config['meta_data'] or self.config['meta_data']['covariate_negative_value']=='':
                 self.covar_bin = covar==pos_val
                 self.codes = {1:pos_val}
             else:
@@ -621,7 +468,7 @@ class ProcessData:
             self.covar_bin = covar
 
         new_data_dicts={}
-        print(f"Splitting data on the basis of {self.config['data']['covariate_variable']}")
+        print(f"Splitting data on the basis of {self.config['meta_data']['covariate_variable']}")
         for cat in np.unique(self.covar_bin.values):
             # if specified_pos:
             #     if cat in self.codes.keys():
@@ -636,7 +483,7 @@ class ProcessData:
             new_data_dicts[cat]['y'] = data_dict['y'].loc[keep_samps]
             # if cat in self.codes.keys():
             print(
-                f"{len(keep_samps)} samples have {self.config['data']['covariate_variable']}={cat}")
+                f"{len(keep_samps)} samples have {self.config['meta_data']['covariate_variable']}={cat}")
             # else:
             #     print(f"{len(keep_samps)} samples have {self.config['data']['covariate_variable']}!={list(self.codes.keys())[0]}")
         return new_data_dicts
@@ -645,21 +492,14 @@ class ProcessData:
         # print(f'\nSaving metabolite data to {self.save_path + "/mets.pkl"}')
                      # 'preprocessing': compose(self.metabolite_processing_funcs)}
         self.Y = self.Y.loc[self.metabolite_data.index.values]
-        data_dict = {'X': self.metabolite_data, 'y': self.Y,
-                     'distances': self.metabolite_dist_df,
-                     'variable_tree': self.metabolite_tree,
-                     'variable_names': self.metabolite_data.columns.values,
+        data_dict = {'X': self.metabolite_data,
+                     'y': self.Y,
+                     'tree': self.metabolite_tree,
                      'preprocessing': self.metabolite_preprocessing,
                      'taxonomy':self.metabolite_classifications,
-                     'labels':self.class_labels}
-        if 'collapse' in self.config['metabolite_data'] and self.config['metabolite_data'][
-                        'collapse'].replace(' ', '').lower() == 'true':
-            if self.collapse==True:
-                data_dict = collapse_dataset(data_dict)
-        if 'replicates' in self.config['metabolite_data'] and self.config['metabolite_data']['replicates']!='':
-            replicates = read_ctsv(self.config['metabolite_data']['replicates'])
-            data_dict['replicates'] = replicates
-        if 'covariate_variable' in self.config['data'] and self.config['data']['covariate_variable']!='':
+                     'class_labels':self.class_labels}
+
+        if 'covariate_variable' in self.config['meta_data'] and self.config['meta_data']['covariate_variable']!='':
             data_dicts = self.split_data_from_covariate(data_dict)
             for k, d in data_dicts.items():
                 if isinstance(k, str):
@@ -670,36 +510,21 @@ class ProcessData:
                 with open(self.save_path +'/'+ k + '_mets.pkl', 'wb') as f:
                     pkl.dump(d, f)
         else:
-            if 'name' in self.config['description'] and self.config['description']['name']!='':
-                k = self.config['description']['name']
-                print(f'\nSaving metabolite data to {self.save_path + "/" + k + "_mets.pkl"}')
-                with open(self.save_path + '/' + k + '_mets.pkl', 'wb') as f:
-                    pkl.dump(data_dict, f)
-            else:
-                print(f'\nSaving metabolite data to {self.save_path + "/" +"mets.pkl"}')
-                with open(self.save_path+'/' + 'mets.pkl', 'wb') as f:
-                    pkl.dump(data_dict, f)
+            print(f'\nSaving metabolite data to {self.save_path + "/" +"mets.pkl"}')
+            with open(self.save_path+'/' + 'mets.pkl', 'wb') as f:
+                pkl.dump(data_dict, f)
 
     def save_sequence_data_to_pickle(self):
         print(f'\nSaving sequence data to {self.save_path + "/taxa.pkl"}')
         self.Y = self.Y.loc[self.sequence_data.index.values]
-        data_dict = {'X': self.sequence_data, 'y': self.Y,
-                     'distances': self.sequence_dist_df,
-                     'variable_tree': self.sequence_tree,
-                     'variable_names': self.sequence_data.columns.values,
+        data_dict = {'X': self.sequence_data,
+                     'y': self.Y,
+                     'tree': self.sequence_tree,
                      'preprocessing': self.sequence_preprocessing,
-                     'labels':self.class_labels}
-        # 'preprocessing': compose(self.sequence_processing_funcs)}
-        if self.taxonomy is not None:
-            data_dict['taxonomy'] = self.taxonomy
-        if self.sequences is not None:
-            data_dict['sequences'] = self.sequences
+                     'class_labels':self.class_labels,
+                     'taxonomy': self.taxonomy}
 
-        if 'replicates' in self.config['sequence_data'] and self.config['sequence_data']['replicates']!='':
-            replicates = read_ctsv(self.config['sequence_data']['replicates'])
-            data_dict['replicates'] = replicates
-
-        if 'covariate_variable' in self.config['data'] and self.config['data']['covariate_variable']!='':
+        if 'covariate_variable' in self.config['meta_data'] and self.config['meta_data']['covariate_variable']!='':
             data_dicts = self.split_data_from_covariate(data_dict)
             for k, data_dict in data_dicts.items():
                 with open(self.save_path + '/' + str(k) + '_taxa.pkl', 'wb') as f:
@@ -712,20 +537,6 @@ class ProcessData:
                 with open(self.save_path+'/' +'taxa.pkl', 'wb') as f:
                     pkl.dump(data_dict, f)
 
-
-
-
-#
-# if __name__ == '__main__':
-#     parser = argparse.ArgumentParser()
-#     parser.add_argument('--config_file', type=str, default='../config_files/cdi_TEST.cfg')
-#     args = parser.parse_args()
-#
-#     # save_path = './datasets/'+args.config.split('./')[-1].split('/')[1].split('.')[0]+'/'
-#     # print(save_path)
-#     # if not os.path.isdir(save_path):
-#     #     os.mkdir(save_path)
-#     pData = ProcessData(args.config_file)
 
 
 
